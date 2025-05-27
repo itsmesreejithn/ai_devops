@@ -6,6 +6,7 @@ import requests
 from app.config import Config
 from app.constants import JENKINS_ROLE, JENKINS_BASE_CONFIG_TEMPLATE
 from app.utils.jenkins_utils import generate_basic_auth_header
+from app.utils.logger import logger
 import re
 import json
 from xml.sax.saxutils import escape
@@ -23,59 +24,64 @@ class TicketState(TypedDict):
 
 def analyze_description(state: TicketState) -> TicketState:
     """Analyze the ticket description using model."""
+    try:
+        logger.info("Analyzing ticket description with LLM")
+        
+        llm = ChatOllama(model=Config.OLLAMA_MODEL, temperature=0.1)
 
-    llm = ChatOllama(model=Config.OLLAMA_MODEL, temperature=0.1)
+        prompt = f"""
+        Analyze the following ticket description and provide insights:
+        
+        {state['description']}
+        
+        Please provide:
+        1. A brief summary of what the user wants to do
+        2. The exact branch name mentioned in the description
+        3. The complete repository URL mentioned in the description 
+        4. The repository name (ONLY the final part after the last slash in the URL)
+        5. Suggest appropriate Docker build command based on the repository name and branch name
+        6. Suggest a Jenkins job name based on the repository name and branch name and if branch name is not provided, use "latest" as default.
 
-    prompt = f"""
-    Analyze the following ticket description and provide insights:
-    
-    {state['description']}
-    
-    Please provide:
-    1. A brief summary of what the user wants to do
-    2. The exact branch name mentioned in the description
-    3. The complete repository URL mentioned in the description 
-    4. The repository name (ONLY the final part after the last slash in the URL)
-    5. Suggest appropriate Docker build command based on the repository name and branch name
-    6. Suggest a Jenkins job name based on the repository name and branch name and if branch name is not provided, use "latest" as default.
+        For Docker build command, consider:
+            - User repository name as image name (lowercase)
+            - Include a tag (latest or branch name)
+            - Standard Docker build syntax
 
-    For Docker build command, consider:
-        - User repository name as image name (lowercase)
-        - Include a tag (latest or branch name)
-        - Standard Docker build syntax
+        Examples of good Docker commands:
+            - "docker build -t my-app:latest ."
+            - "docker build -t service-name:dev ."
+            - "docker build -f Dockerfile -t app-name:v1.o ."
+        
+        Example: From URL "https://git.exmaple.com/xyz/project-smart/smart-tools/smart-service"
+        - repository_name should be: "smart-service"
 
-    Examples of good Docker commands:
-        - "docker build -t my-app:latest ."
-        - "docker build -t service-name:dev ."
-        - "docker build -f Dockerfile -t app-name:v1.o ."
-    
-    Example: From URL "https://git.exmaple.com/xyz/project-smart/smart-tools/smart-service"
-    - repository_name should be: "smart-service"
+        Format the response as a JSON object:
+        
+        ```json
+        {{
+            "summary": "<brief summary>",
+            "repository_name": "<final-part-of-url-only>", 
+            "branch_name": "<extract-branch-name>", 
+            "repository_url": "<complete-url>"
+            "build_command": "<suggested-docker-build-command>"
+            "jenkins_job_name": "<suggested-jenkins-job-name>"
+        }}
+        ```
 
-    Format the response as a JSON object:
-    
-    ```json
-    {{
-        "summary": "<brief summary>",
-        "repository_name": "<final-part-of-url-only>", 
-        "branch_name": "<extract-branch-name>", 
-        "repository_url": "<complete-url>"
-        "build_command": "<suggested-docker-build-command>"
-        "jenkins_job_name": "<suggested-jenkins-job-name>"
-    }}
-    ```
+        Extraction rules:
+        - repository_name: Take ONLY the text after the FINAL slash in the URL
+        - branch_name: Extract exactly as mentioned (dev, main, feature/name, etc.)
+        - repository_url: Copy the complete URL exactly as provided
+        - If no branch is mentioned, use empty string ""
+        - For build_command, use format: "docker build -t <repository_name>:<branch-or-latest> (USE BRANCH NAME FOR TAGGING IF BRANCH NAME IS AVAILABLE) ."
 
-    Extraction rules:
-    - repository_name: Take ONLY the text after the FINAL slash in the URL
-    - branch_name: Extract exactly as mentioned (dev, main, feature/name, etc.)
-    - repository_url: Copy the complete URL exactly as provided
-    - If no branch is mentioned, use empty string ""
-    - For build_command, use format: "docker build -t <repository_name>:<branch-or-latest> (USE BRANCH NAME FOR TAGGING IF BRANCH NAME IS AVAILABLE) ."
-
-    Return ONLY the JSON object with no additional text.
-    """
-    
-    response = llm.invoke(prompt)
+        Return ONLY the JSON object with no additional text.
+        """
+        
+        response = llm.invoke(prompt)
+    except Exception as e:
+        logger.error(f"Error analyzing description: {e}")
+        raise Exception(f"Error analyzing description: {e}")
     
     # Extract JSON from response
     json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', response.content, re.DOTALL)
@@ -97,6 +103,8 @@ def analyze_description(state: TicketState) -> TicketState:
 
 def add_jenkins_user_to_repository(state: TicketState) -> TicketState:
     """Add Jenkins user to the repository."""
+
+    logger.info(f"Adding Jenkins user to repository: {state['repository_name']}")
 
     PROJECT_URL = f"{Config.GITLAB_URL}/api/v4/projects?search={state['repository_name']}"
     USER_URL = f"{Config.GITLAB_URL}/api/v4/users?username={Config.JENKINS_USERNAME}"
@@ -126,13 +134,13 @@ def add_jenkins_user_to_repository(state: TicketState) -> TicketState:
             })
 
             if resonse.status_code == 201 or resonse.status_code == 409:
-                print("Jenkins user added to the repository successfully.")
+                logger.info("Jenkins user added to the repository successfully.")
             else:
-                print("Failed to add Jenkins user to the repository.")
+                logger.error("Failed to add Jenkins user to the repository.")
                 raise Exception("Failed to add Jenkins user to the repository.")
         return state
     except Exception as e:
-        print(e)
+        logger.error(f"Error adding Jenkins user to repository: {e}")
         raise Exception(e)
 
 
@@ -150,12 +158,11 @@ def create_jenkins_job(state: TicketState) -> TicketState:
         params={"name": state["jenkins_job_name"]},
         data=config_xml.encode('utf-8'))
         jenkins_response.raise_for_status()
-        print(jenkins_response.text)
         if jenkins_response.status_code == 200:
-            print("Jenkins job created successfully.")
+            logger.info("Jenkins job created successfully.")
         return state
     except Exception as e:
-        print(e)
+        logger.error(f"Failed to create Jenkins job: {e}")
         raise Exception(f"Failed to create Jenkins job configuration: {e}")
 
 
@@ -179,6 +186,8 @@ def create_ticket_workflow():
 
 def process_ticket_description(description: str) -> Dict[str, Any]:
     """Process a ticket description through the workflow."""
+
+    logger.info("Starting ticket processing workflow")
     workflow = create_ticket_workflow()
     
     # Initialize state
@@ -192,8 +201,11 @@ def process_ticket_description(description: str) -> Dict[str, Any]:
         build_command=""
     )
     
+    logger.info(f"Processing ticket with description: {description[:100]}...")
     # Execute the workflow
     result = workflow.invoke(initial_state)
+    
+    logger.info(f"Ticket processing completed successfully for repository: {result['repository_name']}")
     
     return {
         "ticket_description": result["description"].content,
