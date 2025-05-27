@@ -1,2 +1,4 @@
 .ai_devops/
 .env
+__pycache__
+.idea/

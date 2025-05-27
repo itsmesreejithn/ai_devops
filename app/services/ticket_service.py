@@ -70,7 +70,7 @@ def analyze_description(state: TicketState) -> TicketState:
     - branch_name: Extract exactly as mentioned (dev, main, feature/name, etc.)
     - repository_url: Copy the complete URL exactly as provided
     - If no branch is mentioned, use empty string ""
-    - For build_command, use format: "docker build -t <repository_name>:<branch-or-latest> ."
+    - For build_command, use format: "docker build -t <repository_name>:<branch-or-latest> (USE BRANCH NAME FOR TAGGING IF BRANCH NAME IS AVAILABLE) ."
 
     Return ONLY the JSON object with no additional text.
     """
