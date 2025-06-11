@@ -9,6 +9,9 @@ class Config:
     # Local Model
     OLLAMA_MODEL = os.getenv('OLLAMA_MODEL')
 
+    # Groq Model
+    GROQ_MODEL = os.getenv('GROQ_MODEL')
+
     # OpenAI
     OPENAI_MODEL = os.getenv('OPENAI_MODEL')
 
@@ -21,3 +24,4 @@ class Config:
     JENKINS_USERNAME = os.getenv('JENKINS_USERNAME')
     JENKINS_API_TOKEN = os.getenv("JENKINS_API_TOKEN")
     JENKINS_CREDENTIAL_ID = os.getenv("JENKINS_CREDENTIAL_ID")
+    JENKSIN_AGETN_NODE = os.getenv("JENKSIN_AGETN_NODE")

@@ -3,6 +3,7 @@ from app.models.response import Response
 from app.services.ticket_service import process_ticket_description
 from app.services.background_service import BackgroundTaskManager
 import uuid
+import json
 
 ticket_bp = Blueprint('ticket_bp', __name__)
 

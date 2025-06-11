@@ -48,3 +48,36 @@ JENKINS_BASE_CONFIG_TEMPLATE = """
   <buildWrappers/>
 </project>
 """.strip()
+
+
+JENKINS_BASE_DEPLOYMENT_CONFIG_TEMPLATE = """
+<?xml version='1.1' encoding='UTF-8'?>
+<project>
+    <actions/>
+    <description></description>
+    <keepDependencies>false</keepDependencies>
+    <properties>
+        <com.dabsquared.gitlabjenkins.connection.GitLabConnectionProperty plugin="gitlab-plugin@1.9.8">
+            <gitLabConnection>gitlab</gitLabConnection>
+            <jobCredentialId></jobCredentialId>
+            <useAlternativeCredential>false</useAlternativeCredential>
+        </com.dabsquared.gitlabjenkins.connection.GitLabConnectionProperty>
+    </properties>
+    <scm class="hudson.scm.NullSCM"/>
+    <assignedNode><AGENT_NODE></assignedNode>
+    <canRoam>false</canRoam>
+    <disabled>false</disabled>
+    <blockBuildWhenDownstreamBuilding>false</blockBuildWhenDownstreamBuilding>
+    <blockBuildWhenUpstreamBuilding>false</blockBuildWhenUpstreamBuilding>
+    <triggers/>
+    <concurrentBuild>false</concurrentBuild>
+    <builders>
+        <hudson.tasks.Shell>
+            <command><DEPLOY_COMMAND></command>
+            <configuredLocalRules/>
+        </hudson.tasks.Shell>
+    </builders>
+    <publishers/>
+    <buildWrappers/>
+</project>
+""".strip()
