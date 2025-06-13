@@ -10,7 +10,7 @@ from app.constants import JENKINS_ROLE, JENKINS_BASE_CONFIG_TEMPLATE, JENKINS_BA
 from app.utils.jenkins_utils import generate_basic_auth_header, create_jenkins_job, run_jenkins_job
 from app.utils.ssh_utils import read_readme
 from app.utils.logger import logger
-from app.templates.prompt_template import JENKINS_BUILD_FAILURE_PROMPT, TICKET_ANALYSIS_PROMPT
+from app.templates.prompt_template import JENKINS_BUILD_FAILURE_PROMPT, TICKET_ANALYSIS_PROMPT, DOCKER_RUN_COMMAND_GENERATOR_PROMPT
 import re
 import json
 import time
@@ -27,7 +27,7 @@ def analyze_description(state: TicketState) -> TicketState:
         # llm = ChatOllama(model=Config.OLLAMA_MODEL, temperature=0.1)
         llm = ChatGroq(model=Config.GROQ_MODEL, temperature=0.1)
         prompt = PromptTemplate(template=TICKET_ANALYSIS_PROMPT)
-        response = llm.invoke(prompt.format(description=state['description']))
+        response = llm.invoke(prompt.format(description=state['description'], docker_hub_repository=Config.DOCKER_HUB_REPOSITORY))
     except Exception as e:
         logger.error(f"Error analyzing description: {e}")
         raise Exception(f"Error analyzing description: {e}")
@@ -47,7 +47,8 @@ def analyze_description(state: TicketState) -> TicketState:
         "summary": result_json.get("summary", ""),
         "repository_name": result_json.get("repository_name", ""),
         "build_command": result_json.get("build_command", ""),
-        "jenkins_job_name": result_json.get("jenkins_job_name", "")
+        "jenkins_job_name": result_json.get("jenkins_job_name", ""),
+        "image": result_json.get("image", "")
     }
 
 def add_jenkins_user_to_repository(state: TicketState) -> TicketState:
@@ -95,23 +96,49 @@ def add_jenkins_user_to_repository(state: TicketState) -> TicketState:
 def jenkins_job(state: TicketState) -> TicketState:
     """Create a jenkins job tor the ticket and run that job"""
     try:
+        jenkins_job_name = f'{state["jenkins_job_name"]}-{state["current_job"]}'
         if state["current_job"] == "build":
-            config_xml = JENKINS_BASE_CONFIG_TEMPLATE.replace("<GIT_SSH_URL>", escape(state["ssh_url_to_repo"])).replace("<JENKINS_CREDENTIAL_ID>", escape(Config.JENKINS_CREDENTIAL_ID)).replace("<BRANCH_NAME>", escape(state["branch_name"] if state["branch_name"] else "main")).replace("<BUILD_COMMAND>", escape(state["build_command"]))
-            response = create_jenkins_job(config_xml=config_xml, jenkins_job=state["jenkins_job_name"])
-            read_me = read_readme(jenkins_job_name=state["jenkins_job_name"])
-            state["read_me"] = read_me
+            build_command = f"{state['build_command']} \n echo 'This is the paswd for docker' docker login -u sreejithai --password-stdin \n docker push {state['image']}"
+            config_xml = JENKINS_BASE_CONFIG_TEMPLATE.replace("<GIT_SSH_URL>", escape(state["ssh_url_to_repo"])).replace("<JENKINS_CREDENTIAL_ID>", escape(Config.JENKINS_CREDENTIAL_ID)).replace("<BRANCH_NAME>", escape(state["branch_name"] if state["branch_name"] else "main")).replace("<BUILD_COMMAND>", escape(build_command))
+            response = create_jenkins_job(config_xml=config_xml, jenkins_job_name=jenkins_job_name)
             if not response:
                 raise Exception("Failed to create Jenkins job.")
         elif state["current_job"] == "deploy":
-            config_xml = JENKINS_BASE_DEPLOYMENT_CONFIG_TEMPLATE.replace("<AGENT_NODE>", escape(Config.JENKSIN_AGETN_NODE)).replace("<DEPLOY_COMMAND", escape(state["deploy_command"])) 
-            response = create_jenkins_job(jenkins_job=state["jenkins_job_name"])
+            llm = ChatGroq(model=Config.GROQ_MODEL, temperature=0.1)
+            prompt = PromptTemplate(template=DOCKER_RUN_COMMAND_GENERATOR_PROMPT)
+            llm_response = llm.invoke(prompt.format(read_me=state["read_me"], dockerfile=state["dockerfile"], build_command=state["build_command"]))
+            logger.info(f"LLM response: {llm_response.content}")
+            
+            # Extract JSON from response
+            json_match = re.search(r'```(?:json)?\s*({.*?})\s*```', llm_response.content, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = llm_response.content
+                
+            try:
+                response_json = json.loads(json_str)
+                state["run_command"] = response_json.get("command", "")
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse LLM response as JSON: {e}")
+                state["run_command"] = "docker run -d --name app app:latest"  # Fallback command
+                
+            deploy_command = f"echo 'This is the paswd for docker' sudo docker login -u sreejithai --password-stdin \n sudo {state['run_command']}"
+            config_xml = JENKINS_BASE_DEPLOYMENT_CONFIG_TEMPLATE.replace("<AGENT_NODE>", escape(Config.JENKSIN_AGETN_NODE)).replace("<DEPLOY_COMMAND>", escape(deploy_command)) 
+            response = create_jenkins_job(config_xml=config_xml, jenkins_job_name=jenkins_job_name)
             if not response:
                 raise Exception("Failed to run Jenkins job.")
             
         if state["current_job"] != "done": 
-            response = run_jenkins_job(jenkins_job=state["jenkins_job_name"])
+            response = run_jenkins_job(jenkins_job_name=jenkins_job_name)
             if not response:
                 raise Exception("Failed to run Jenkins job.")
+
+            if state["current_job"] == "build":    
+                read_me, dockerfile = read_readme(jenkins_job_name=jenkins_job_name)
+                state["read_me"] = read_me
+                state["dockerfile"] = dockerfile
+        state["current_jenkins_job"] = jenkins_job_name
         return state
     except Exception as e:
         logger.error(f"Failed Jenkins job: {e}")
@@ -120,10 +147,11 @@ def jenkins_job(state: TicketState) -> TicketState:
 def analyze_jenkis_console_output(state: TicketState) -> TicketState:
     """Analyze the the jenkis console outup"""
     try:
-        logger.info(f'Analyzing jenkins job {state["jenkins_job_name"]} console output with LLM')
+        logger.info(f'Analyzing jenkins job {state["current_jenkins_job"]} console output with LLM')
         time.sleep(10)
+        console_analysis = {}
         llm = ChatOllama(model=Config.OLLAMA_MODEL, temperature=0.1)
-        JENKINS_CONSOLE_TEXT_URL = f"{Config.JENKINS_URL}/job/{state['jenkins_job_name']}/lastBuild/consoleText"
+        JENKINS_CONSOLE_TEXT_URL = f"{Config.JENKINS_URL}/job/{state['current_jenkins_job']}/lastBuild/consoleText"
         encoded_credentials = generate_basic_auth_header(username=Config.JENKINS_USERNAME, password=Config.JENKINS_API_TOKEN)
         jenkins_response = requests.post(JENKINS_CONSOLE_TEXT_URL, headers={
             'Content-Type': 'application/xml',
@@ -131,23 +159,25 @@ def analyze_jenkis_console_output(state: TicketState) -> TicketState:
         })
         jenkins_response.raise_for_status()
         if jenkins_response.status_code == 200:
-            console_text = jenkins_response.text
+            console_text = jenkins_response.text 
+            
             if "Finished: FAILURE" in console_text:
-                logger.warning(f'Jenkins job {state["jenkins_job_name"]} failed')
+                logger.warning(f'Jenkins job {state["current_jenkins_job"]} failed')
                 prompt = PromptTemplate(template=JENKINS_BUILD_FAILURE_PROMPT)     
 
                 response = llm.invoke(prompt.format(
                     repository_name = state["repository_name"],
                     branch_name = state["branch_name"],
                     build_command = state["build_command"],
-                    jenkins_job_name = state["jenkins_job_name"],
+                    jenkins_job_name = state["current_jenkins_job"],
                     console_text = console_text,
                 ))
                 logger.info(f"Jenkins console output analyzed successfully")
-
-            return {
-                "console_analysis": json.loads(response.content) or {},
-            }
+                console_analysis = json.loads(response.content) or {}
+            elif "Finished: SUCCESS" in console_text:
+                logger.info(f'Jenkins job {state["current_jenkins_job"]} success')
+        
+        state["console_analysis"] = console_analysis
         
         if state["current_job"] == "build":
             logger.info(f"Current jenkins job switced to deploy")
@@ -219,7 +249,9 @@ def process_ticket_description(description: str) -> Dict[str, Any]:
         readme_content="",
         current_job="build",
         read_me="",
-        run_command=""
+        run_command="",
+        current_jenkins_job="",
+        image=""
     )
     
     logger.info(f"Processing ticket with description: {description[:100]}...")

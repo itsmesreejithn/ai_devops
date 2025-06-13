@@ -15,3 +15,6 @@ class TicketState(TypedDict):
     current_job: str
     read_me: str
     run_command: str
+    dockerfile: str
+    current_jenkins_job: str
+    image: str

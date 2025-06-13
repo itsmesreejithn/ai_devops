@@ -5,7 +5,7 @@ from app.config import Config
 from lxml import etree
 from app.utils.logger import logger
 
-jenkins_server = Jenkins(baseurl=Config.JENKINS_URL, username=Config.JENKINS_USERNAME, password=Config.JENKINS_API_TOKEN)
+# jenkins_server = Jenkins(baseurl=Config.JENKINS_URL, username=Config.JENKINS_USERNAME, password=Config.JENKINS_API_TOKEN)
 
 def generate_basic_auth_header(username: str, password: str) -> str:
     credentials = f"{username}:{password}"
@@ -65,31 +65,31 @@ def run_jenkins_job(jenkins_job_name: str):
         raise Exception(f"Failed to trigger Jenkins job: {e}")
 
     
-def create_new_node(node_name: str, node_description: str, num_executors: int):
-    nodes = jenkins_server.get_nodes()
-    config = {
-        'name': node_name,
-        'nodeDescription': node_description,
-        'numExecutors': num_executors,
-        'remoteFS': '/home/jenkins/agent',
-        'labelString': 'SLAVE-DOCKER linux',
-        'mode': 'EXCLUSIVE',
-        'launcher': {
-            'stapler-class': 'hudson.slaves.JNLPLauncher',
-            '$class': 'hudson.slaves.JNLPLauncher',
-            'workDirSettings': {
-                'disabled': True,
-                'workDirPath': '',
-                'internalDir': 'remoting',
-                'failIfWorkDirIsMissing': False
-            },
-            'tunnel': '',
-            'vmargs': '-Xmx1024m'
-        },
-        'retentionStrategy': {
-            'stapler-class': 'hudson.slaves.RetentionStrategy$Always',
-            '$class': 'hudson.slaves.RetentionStrategy$Always'
-        }
-    }
+# def create_new_node(node_name: str, node_description: str, num_executors: int):
+#     nodes = jenkins_server.get_nodes()
+#     config = {
+#         'name': node_name,
+#         'nodeDescription': node_description,
+#         'numExecutors': num_executors,
+#         'remoteFS': '/home/jenkins/agent',
+#         'labelString': 'SLAVE-DOCKER linux',
+#         'mode': 'EXCLUSIVE',
+#         'launcher': {
+#             'stapler-class': 'hudson.slaves.JNLPLauncher',
+#             '$class': 'hudson.slaves.JNLPLauncher',
+#             'workDirSettings': {
+#                 'disabled': True,
+#                 'workDirPath': '',
+#                 'internalDir': 'remoting',
+#                 'failIfWorkDirIsMissing': False
+#             },
+#             'tunnel': '',
+#             'vmargs': '-Xmx1024m'
+#         },
+#         'retentionStrategy': {
+#             'stapler-class': 'hudson.slaves.RetentionStrategy$Always',
+#             '$class': 'hudson.slaves.RetentionStrategy$Always'
+#         }
+#     }
 
-    new_node = nodes.create_node_with_config(name=node_name, config=config)
+#     new_node = nodes.create_node_with_config(name=node_name, config=config)

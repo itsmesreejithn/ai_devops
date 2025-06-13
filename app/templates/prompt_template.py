@@ -104,24 +104,29 @@ TICKET_ANALYSIS_PROMPT = """
 Analyze the following ticket description and provide insights:
         
 {description}
+
+
+**Docker hub repository**
+{docker_hub_repository}
         
 Please provide:
     1. A brief summary of what the user wants to do
     2. The exact branch name mentioned in the description
     3. The complete repository URL mentioned in the description 
     4. The repository name (ONLY the final part after the last slash in the URL)
-    5. Suggest appropriate Docker build command based on the repository name and branch name
-    6. Suggest a Jenkins job name based on the repository name and branch name and if branch name is not provided, use "latest" as default.
+    5. Suggest appropriate Docker build command based on the repository name and branch name and the docker_hub_repository name
+    6. Suggest a Jenkins job name based on the repository name and branch name and if branch name is not provided, use "latest" as default and make sure not to add the docker_hub_repository name of jenkins job name.
 
     For Docker build command, consider:
         - User repository name as image name (lowercase)
         - Include a tag (latest or branch name)
         - Standard Docker build syntax
 
-    Examples of good Docker commands:
-        - "docker build -t my-app:latest ."
-        - "docker build -t service-name:dev ."
-        - "docker build -f Dockerfile -t app-name:v1.o ."
+    Examples of good Docker build commands with use of docker hub repository name:
+        - "docker build -t <docker_hub_repository>/<image>:<tag> ."
+        - "docker build -t myrepositroy/my-app:latest ."
+        - "docker build -t myrepository/service-name:dev ."
+        - "docker build -f Dockerfile -t myrepository/app-name:v1.o ."
         
     Example: From URL "https://git.exmaple.com/xyz/project-smart/smart-tools/smart-service"
     - repository_name should be: "smart-service"
@@ -131,11 +136,12 @@ Please provide:
     ```json
     {{
         "summary": "<brief summary>",
-        "repository_name": "<final-part-of-url-only>", 
+        "repository_name": "<final-part-of-url-only>" #DONOT ADD THE DOCKER HUB REPOSITORY NAME, 
         "branch_name": "<extract-branch-name>", 
         "repository_url": "<complete-url>",
-        "build_command": "<suggested-docker-build-command>",
-        "jenkins_job_name": "<suggested-jenkins-job-name>"
+        "build_command": "<suggested-docker-build-command-with-adding-docker_hub_repository-name>",
+        "jenkins_job_name": "<suggested-jenkins-job-name>" #DONOT ADD THE DOCKER HUB REPOSITORY NAME,
+        "image" : "<suggested-image-for-docker-build-command-with-docker_hub_repository>"
     }}
     ```
 
@@ -144,7 +150,63 @@ Please provide:
     - branch_name: Extract exactly as mentioned (dev, main, feature/name, etc.)
     - repository_url: Copy the complete URL exactly as provided
     - If no branch is mentioned, use empty string ""
-    - For build_command, use format: "docker build -t <repository_name>:<branch-or-latest> (USE BRANCH NAME FOR TAGGING IF BRANCH NAME IS AVAILABLE) ."
+    - For build_command, use format: "docker build -t <docker_hub_repository_name>/<repository_name>:<branch-or-latest> (USE BRANCH NAME FOR TAGGING IF BRANCH NAME IS AVAILABLE) ."
 
     Return ONLY the JSON object with no additional text.
+"""
+# Docker run command generator
+DOCKER_RUN_COMMAND_GENERATOR_PROMPT = """
+You are an expert DevOps engineer specializing in containerization and Docker optimization. Your task is to generate an optimized, production-ready Docker run command for the given application.
+
+## Context Analysis
+Analyze the following application context to understand:
+- Application type, framework, and runtime requirements
+- Port configurations and networking needs
+- Environment variables and configuration requirements
+- Volume mounts and data persistence needs
+- Security considerations and best practices
+
+**Build Command:**
+{build_command}
+
+**README.md Content:**
+{read_me}
+
+**Dockerfile Content:**
+{dockerfile}
+
+## Requirements
+Generate a Docker run command that:
+
+### Core Functionality
+- Correctly exposes all necessary ports with appropriate mapping
+- Includes all required environment variables with secure defaults
+- Implements proper volume mounting for data persistence and configuration
+- Sets appropriate container naming for easy management
+- Extract the image name/tag from the build command's `-t` flag and use it as the container source
+
+### Security & Best Practices
+- Runs with non-root user when possible
+- Implements resource limits (memory, CPU) for production stability
+- Uses appropriate restart policies
+- Includes health checks if applicable
+- Follows principle of least privilege
+
+### Optimization
+- Minimizes attack surface through selective port exposure
+- Optimizes for the specific application type (web app, API, database, etc.)
+- Includes logging configuration for monitoring
+- Considers network isolation and container communication
+
+## Output Format
+You must respond ONLY with a valid JSON object in this exact format:
+
+{{
+  "command": "<complete docker run command here>"
+}}
+
+IMPORTANT
+ - ONLY RETURN JSON RESPONSE NO OTHER FORMATING REQUIRED
+
+The command should be copy-paste ready and follow Docker best practices for production deployment. Do not include any additional text, explanations, or formatting outside of the JSON response.
 """
