@@ -150,7 +150,8 @@ def analyze_jenkis_console_output(state: TicketState) -> TicketState:
         logger.info(f'Analyzing jenkins job {state["current_jenkins_job"]} console output with LLM')
         time.sleep(10)
         console_analysis = {}
-        llm = ChatOllama(model=Config.OLLAMA_MODEL, temperature=0.1)
+        # llm = ChatOllama(model=Config.OLLAMA_MODEL, temperature=0.1)
+        llm = ChatGroq(model=Config.GROQ_MODEL, temperature=0.1)
         JENKINS_CONSOLE_TEXT_URL = f"{Config.JENKINS_URL}/job/{state['current_jenkins_job']}/lastBuild/consoleText"
         encoded_credentials = generate_basic_auth_header(username=Config.JENKINS_USERNAME, password=Config.JENKINS_API_TOKEN)
         jenkins_response = requests.post(JENKINS_CONSOLE_TEXT_URL, headers={
@@ -181,15 +182,13 @@ def analyze_jenkis_console_output(state: TicketState) -> TicketState:
         
         if state["current_job"] == "build":
             logger.info(f"Current jenkins job switced to deploy")
-            return {
-                "current_job" : "deploy"
-            }
+            state["current_job"] = "deploy"
 
         if state["current_job"] == "deploy":
             logger.info(f"Current jenkins job switced to done")
-            return {
-                "current_job" : "done"
-            }
+            state["current_job"] = "done"
+
+        return state
     except Exception as e:
         logger.error(f"Failed to analyze jenkins job console output: {e}")
         raise Exception(f"Failed to analyze jenkins job console output: {e}")
@@ -245,7 +244,6 @@ def process_ticket_description(description: str) -> Dict[str, Any]:
         summary="",
         jenkins_job_name="",
         build_command="",
-        console_analysis="",
         readme_content="",
         current_job="build",
         read_me="",
